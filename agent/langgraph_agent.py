@@ -3,12 +3,12 @@ import sys
 from typing import TypedDict, List
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agent.skills.darja_parser import DarjaDialectParserSkill
 from agent.skills.tunisovereign_skills import (
-    DarjaDialectParserSkill,
     TelemetryAnomalySkill,
     ZKContractSettlementSkill,
 )
-from mcp_server.tunisovereign_mcp import calculate_sovereign_quota_allocation
+from mcp_server.tunisovereign_mcp import calculate_evapotranspiration_budget
 
 
 class SovereignAgentState(TypedDict):
@@ -36,8 +36,8 @@ def run_sovereign_agent_loop(initial_state: SovereignAgentState) -> SovereignAge
 
     # Node 1: Darja Voice/SMS Intent Skill
     s1 = DarjaDialectParserSkill()
-    state["parsed_intent"] = s1.execute(state["darja_input"])
-    state["skills_trace"].append(s1.skill_name)
+    state["parsed_intent"] = s1.run({"text": state["darja_input"]})
+    state["skills_trace"].append(s1.name)
 
     # Node 2: ML Telemetry Anomaly Verification Skill
     s2 = TelemetryAnomalySkill()
@@ -49,14 +49,14 @@ def run_sovereign_agent_loop(initial_state: SovereignAgentState) -> SovereignAge
     # Node 3: Invoke Custom Python FastMCP Tool
     gov = state["parsed_intent"]["governorate"]
     req_units = state["parsed_intent"]["requested_units"]
-    mcp_res = calculate_sovereign_quota_allocation(
+    mcp_res = calculate_evapotranspiration_budget(
         governorate=gov,
-        soil_moisture_pct=state["moisture_pct"],
-        temp_c=state["temp_c"],
+        current_moisture_pct=state["moisture_pct"],
+        ambient_temp_c=state["temp_c"],
         requested_units=req_units,
     )
     state["mcp_allocation"] = mcp_res
-    state["skills_trace"].append("FastMCP::calculate_sovereign_quota_allocation")
+    state["skills_trace"].append("FastMCP::calculate_evapotranspiration_budget")
 
     # Node 4 & 5: Policy Gate + ZK Commitment & Smart Contract Settlement Skill
     s3 = ZKContractSettlementSkill()
