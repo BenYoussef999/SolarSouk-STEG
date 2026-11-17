@@ -21,7 +21,6 @@ numpy = ">=1.26.4"
 pandas = ">=2.2.3"
 langgraph = ">=0.2.35"
 langchain-core = ">=0.3.10"
-mcp = ">=1.1.0"
 pydantic = ">=2.9.2"
 web3 = ">=7.3.0"
 py-solc-x = ">=2.0.3"
@@ -29,6 +28,8 @@ streamlit = ">=1.39.0"
 plotly = ">=5.24.1"
 requests = ">=2.32.3"
 pytest = ">=8.0"
+mcp = "<2,>=1.9"
+httpx = "*"
 
 [dev-packages]
 
