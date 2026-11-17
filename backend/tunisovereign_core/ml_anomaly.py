@@ -1,55 +1,59 @@
-import numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.metrics import precision_score, recall_score, f1_score
+"""
+Dual ML anomaly engine (IsolationForest + rolling z-score + Tunisian threshold rules)
+with a reproducible Precision / Recall / F1 harness.
+
+Run:  python backend/tunisovereign_core/ml_anomaly.py
+"""
+import os
+import sys
+
+from sklearn.metrics import precision_recall_fscore_support
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from backend.tunisovereign_core.ml_detector import AnomalyDetector
+from backend.tunisovereign_core.ml_synthetic import generate_dataset
+
+METHODS = [("IsolationForest", "if_flag"), ("Rolling Z-Score", "z_flag"),
+           ("Threshold Rules", "rule_flag"), ("Combined (IF OR Rules)", "is_anomaly")]
 
 
 class TunisianTelemetryAnomalyEngine:
-    '''
-    Dual ML Anomaly Detector (IsolationForest + Rolling Z-Score)
-    with a reproducible Precision / Recall / F1-Score evaluation harness.
-    '''
-    def __init__(self, contamination: float = 0.08, random_state: int = 42):
-        self.model = IsolationForest(
-            n_estimators=150,
-            contamination=contamination,
-            random_state=random_state,
-        )
+    """Train on one synthetic series (seed 42), evaluate on a different one (seed 7)."""
 
-    def fit_and_evaluate_synthetic_benchmark(self, n_samples: int = 500) -> dict:
-        rng = np.random.default_rng(42)
-        hours = np.linspace(0, 72, n_samples)
-        # Normal diurnal Tunisian semi-arid pattern: moisture (%), temp (C), flow (L/min)
-        moisture = 58.0 + 6.0 * np.sin(2 * np.pi * hours / 24.0) + rng.normal(0, 1.8, n_samples)
-        temp = 26.0 - 5.0 * np.cos(2 * np.pi * hours / 24.0) + rng.normal(0, 1.1, n_samples)
-        flow = 120.0 + 15.0 * np.sin(2 * np.pi * hours / 12.0) + rng.normal(0, 4.0, n_samples)
+    def __init__(self, contamination: float = 0.07, random_state: int = 42):
+        self.contamination = contamination
+        self.random_state = random_state
 
-        y_true = np.zeros(n_samples, dtype=int)
-        # Inject 40 true anomalies (pipe burst drops, Sirocco heat spikes, unauthorized pumping)
-        anomaly_indices = rng.choice(n_samples, size=40, replace=False)
-        for idx in anomaly_indices:
-            y_true[idx] = 1
-            moisture[idx] -= rng.uniform(18.0, 28.0)
-            temp[idx] += rng.uniform(8.0, 14.0)
-            flow[idx] += rng.uniform(55.0, 95.0)
+    def _run(self):
+        train = generate_dataset(seed=42)
+        test = generate_dataset(seed=7)
+        det = AnomalyDetector(contamination=self.contamination, random_state=self.random_state)
+        return test, det.fit(train).score(test)
 
-        X = np.column_stack([moisture, temp, flow])
-        preds_raw = self.model.fit_predict(X)
-        y_pred = (preds_raw == -1).astype(int)
+    def evaluate_all_methods(self) -> dict:
+        test, scored = self._run()
+        out = {}
+        for name, col in METHODS:
+            p, r, f, _ = precision_recall_fscore_support(
+                test["label"], scored[col], average="binary", zero_division=0)
+            out[name] = {"precision": round(float(p), 4), "recall": round(float(r), 4),
+                         "f1_score": round(float(f), 4)}
+        return out
 
-        precision = round(float(precision_score(y_true, y_pred, zero_division=0)), 4)
-        recall = round(float(recall_score(y_true, y_pred, zero_division=0)), 4)
-        f1 = round(float(f1_score(y_true, y_pred, zero_division=0)), 4)
-        return {
-            "samples": n_samples,
-            "injected_anomalies": int(y_true.sum()),
-            "detected_anomalies": int(y_pred.sum()),
-            "precision": precision,
-            "recall": recall,
-            "f1_score": f1,
-        }
+    def fit_and_evaluate_synthetic_benchmark(self) -> dict:
+        """Flat dict (kept compatible with the Streamlit dashboard): the combined detector."""
+        test, scored = self._run()
+        p, r, f, _ = precision_recall_fscore_support(
+            test["label"], scored["is_anomaly"], average="binary", zero_division=0)
+        return {"samples": int(len(test)), "injected_anomalies": int(test["label"].sum()),
+                "detected_anomalies": int(scored["is_anomaly"].sum()),
+                "precision": round(float(p), 4), "recall": round(float(r), 4),
+                "f1_score": round(float(f), 4)}
 
 
 if __name__ == "__main__":
     engine = TunisianTelemetryAnomalyEngine()
-    metrics = engine.fit_and_evaluate_synthetic_benchmark()
-    print("ML Anomaly Evaluation Metrics:", metrics)
+    print(f"{'Method':<24}{'Precision':>10}{'Recall':>9}{'F1':>8}")
+    for name, m in engine.evaluate_all_methods().items():
+        print(f"{name:<24}{m['precision']:>10}{m['recall']:>9}{m['f1_score']:>8}")
+    print("Combined metrics:", engine.fit_and_evaluate_synthetic_benchmark())
